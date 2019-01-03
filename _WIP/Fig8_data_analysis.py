@@ -43,6 +43,14 @@ df.head()
 df.duplicated().sum()
 
 #%%
+for column in df.columns:
+    try:
+        df[column] = df[column].astype('int8')
+    except:
+        pass
+df.dtypes
+
+#%%
 engine = create_engine('sqlite:///Fig8messages.db')
 df.to_sql('Fig8Messages', engine, if_exists = 'replace')
 

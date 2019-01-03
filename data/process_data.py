@@ -14,6 +14,11 @@ def clean_data(df):
     targets = df.categories.str.split(';', expand = True).applymap(lambda x: x.split('-')[1])
     targets.columns = [x.split('-')[0] for x in df.categories[0].split(';')]
     df = pd.concat([df.drop('categories', axis = 1), targets], axis = 1)
+    for column in df.columns:
+        try:
+            df[column] = df[column].astype('int8')
+        except:
+            pass
     return df
 
 def save_data(df, database_filepath, table_name):
