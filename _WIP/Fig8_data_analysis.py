@@ -51,6 +51,17 @@ for column in df.columns:
 df.dtypes
 
 #%%
+(df.iloc[:,4:].sum(axis = 0) / df.shape[0] * 100).round(2)
+
+#%%
+for column in df.columns[4:]:
+    print(f'{column} - {df[column].unique()}')
+
+#%%
+df.related = df.related.apply(lambda x: 1 if x == 2 else x)
+df.related.unique()
+
+#%%
 engine = create_engine('sqlite:///Fig8messages.db')
 df.to_sql('Fig8Messages', engine, if_exists = 'replace')
 

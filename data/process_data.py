@@ -19,6 +19,7 @@ def clean_data(df):
             df[column] = df[column].astype('int8')
         except:
             pass
+    df.related = df.related.apply(lambda x: 1 if x == 2 else x)
     return df
 
 def save_data(df, database_filepath, table_name):
