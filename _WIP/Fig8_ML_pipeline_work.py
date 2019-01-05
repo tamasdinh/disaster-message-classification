@@ -7,9 +7,11 @@
 import pandas as pd
 pd.set_option('display.max_columns', None)
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import numpy as np
-import os
 from sqlalchemy import create_engine
+import pickle
+import os
 os.chdir('/Users/tamasdinh/Dropbox/Data-Science_suli/3_Udacity-Data-Scientist/0_Projects/4_Figure8-disaster-response')
 
 from nltk.tokenize import word_tokenize
@@ -22,16 +24,34 @@ nltk.download('wordnet')
 
 import re
 import time
-import datetime
+from datetime import datetime
 
 from sklearn.pipeline import Pipeline, FeatureUnion
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import TfidfTransformer, CountVectorizer
-from sklearn.multioutput import MultiOutputClassifier
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.metrics import classification_report, accuracy_score, precision_score, recall_score
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.multioutput import MultiOutputClassifier
+from sklearn.metrics import classification_report, accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, make_scorer
+
+#%% [markdown]
+# ### Loading data from previously prepared message database
+#%%
+engine = create_engine('sqlite:///./data/Fig8messages.db')
+df = pd.read_sql_table('Messages', engine)
+df.head()
+
+#%% [markdown]
+# ### Preparing training and test sets
+#%%
+category_counts_series = df.drop(['message', 'genre', 'original', 'id', 'index'], axis = 1).sum(axis = 0)
+zero_cats = [x for x in category_counts_series[category_counts_series == 0].index]
+print('The following categories have no records to them:\n {}'.format(zero_cats))
+print('-------- Removing {} category label(s) ---------'.format(len(zero_cats)))
+df.drop(zero_cats, axis = 1, inplace = True)
+category_counts_series.drop(zero_cats, inplace = True)
+X = df[['message']].values.ravel()
+y = df.drop(['message', 'genre', 'original', 'id', 'index'], axis = 1).values
 
 #%% [markdown]
 # ### Setting up tokenizer function
@@ -43,147 +63,67 @@ def tokenize(text):
     return clean_text
 
 #%% [markdown]
-# ### Loading data from previously prepared message database
+# ### Setting up custom Transformer for word count filtering
 #%%
-# load data from database
-engine = create_engine('sqlite:///./data/Fig8messages.db')
-df = pd.read_sql_table('Messages', engine)
-df.head()
-
-#%% [markdown]
-# ### Analyzing target labels
-#%%
-df_counts = df.iloc[:, 5:].mean().reset_index().set_index('index')
-df_counts['counts'] = df.iloc[:,5:].sum().values
-plt.figure(figsize = (12, 8))
-plt.ylim([0, 1])
-df_counts.iloc[:, 0].plot.bar()
-
-#%%
-min_count_target = df_counts.counts[df_counts.counts > 0].min()
-print(f'Minimum count in target label: {min_count_target}')
-df_counts.round(2)
-
-#%% [markdown]
-# ### Analyzing word count
-#%%
-from collections import Counter
-words = []
-for item in df.message:
-    msg = tokenize(item)
-    words += msg
-word_count = pd.Series(Counter(words)).sort_values(ascending = False)
-word_count
-
-#%%
-plt.figure(figsize = (12, 8))
-word_count.plot(kind = 'line')
-word_count.describe()
-
-#%%
-plt.figure(figsize = (12, 8))
-word_count[word_count > min_count_target].plot(kind = 'line')
-print(f'Number of word features remaining when taking minimum count of target variables ({min_count_target}): {word_count[word_count > min_count_target].shape[0]}')
-
-#%% [markdown]
-# ### Preparing training and test sets
-# 'Child alone' has no occurences; for modelling reasons I'll drop that target variable (in a flexible, programmatic way so that if someone wnats to use the app with another dataset he/she can do so)
-
-#%%
-category_counts_series = df.loc[:,df.dtypes != 'object'].sum(axis = 0)
-zero_cats = [x for x in category_counts_series[category_counts_series == 0].index]
-print('The following categories have no records to them:\n {}'.format(zero_cats))
-print('-------- Removing {} category label(s) ---------'.format(len(zero_cats)))
-df.drop(zero_cats, axis = 1, inplace = True)
-X = df[['message']].values.ravel()
-y = df.drop(['message', 'genre', 'original', 'id', 'index'], axis = 1).values
-
-#%%
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.3)
-print('train-test split ready')
-
-#%%
-count_vect = CountVectorizer(tokenizer = tokenize)
-X_train = count_vect.fit_transform(X_train)
-print('count vectorizer ready')
-
-#%%
-filter = (X_train.sum(axis = 0) > min_count_target).A1
-X_train = X_train[:,filter]
-
-#%%
-tfidf = TfidfTransformer()
-X_train = tfidf.fit_transform(X_train)
-print('td idf transform ready')
-
-#%%
-log_model = RandomForestClassifier(verbose = 3)
-print('model fit started...')
-log_model.fit(X_train, y_train[:, 1])
-print('model fit ready')
-
-#%%
-X_test = count_vect.transform(X_test)
-
-#%%
-X_test = X_test[:,filter]
-X_test = tfidf.transform(X_test)
-
-#%%
-y_preds = log_model.predict(X_test)
-print('predictions ready')
-
-#%%
-hello = y_test[:,0]
-
-#%%
-from pprint import pprint
-pprint(classification_report(y_preds, y_test[:,1]))
-pprint(accuracy_score(y_preds, y_test[:,1]))
-
-#%%
-y_test[:,1].mean()
-
-#%%
-class TfIdfFilter(BaseEstimator, TransformerMixin):
+class WordCountFilter(BaseEstimator, TransformerMixin):
     
-    def __init__(self, tfidf_limit = 80):
-        self.filter = 0
-        self.tdfidf_limit = tfidf_limit
-    
-    def fit(self, X, y = None):
-        bow = pd.Series(X.sum(axis = 0))
-        self.filter = bow[bow > np.percentile(bow, self.tdfidf_limit)].index
+    def fit(self, X, y):
+        min_count_target = y.sum(axis = 0).min()
+        self.filter = (X.sum(axis = 0) > min_count_target).A1
+        return self
 
     def transform(self, X):
-        X = pd.DataFrame(X).iloc[self.filter]
-        return X
+        return X[:,self.filter]
 
 #%% [markdown]
-# ### 3. Build a machine learning pipeline
-# - You'll find the [MultiOutputClassifier](http://scikit-learn.org/stable/modules/generated/sklearn.multioutput.MultiOutputClassifier.html) helpful for predicting multiple target variables.
+# ### Setting up metric collection
+#%%
+df_metrics = []
+def metrics_collection(y_preds, y_test):
+    prec_list = []
+    recall_list = []
+    f1_score_list = []
+    for i in range(y_preds.shape[1]):
+        prec_list.append(precision_score(y_test[:, i], y_preds[:, i]))
+        recall_list.append(recall_score(y_test[:, i], y_preds[:, i]))
+        f1_score_list.append(f1_score(y_test[:, i], y_preds[:, i]))
+    df = pd.DataFrame({'F1-score': f1_score_list, 'Precision': prec_list, 'Recall': recall_list}, index = category_counts_series.index)
+    df = df.loc[df_naive.index]
+    return df
 
+#%% [markdown]
+# ### Calculating naive benchmark
+#%%
+df_naive = df.iloc[:,5:].mean(axis = 0).reset_index().set_index('index')
+df_naive.columns = ['Precision']
+df_naive['F1-score'] = (1 + 1**2) * (df_naive.Precision * 1) / (1**2 * (df_naive.Precision + 1))
+df_naive = df_naive[['F1-score', 'Precision']].sort_values(by = 'F1-score', ascending = False)
+df_metrics.append(df_naive)
+
+#%% [markdown]
+# ### Setting up machine learning pipeline
 #%%
 pipeline = Pipeline([
     ('countvect', CountVectorizer(tokenizer = tokenize)),
+    ('wordcount-filter', WordCountFilter()),
     ('tf-idf', TfidfTransformer()),
-#    ('tf-idf-filter', TfIdfFilter()),
-    ('multi-output-classification', LogisticRegression())
+    ('multi-output-classification', MultiOutputClassifier(GradientBoostingClassifier(n_estimators = 300, verbose = 1, n_iter_no_change = 50)))
 ])
 
 #%% [markdown]
-# ### 4. Train pipeline
-# - Split data into train and test sets
-# - Train pipeline
-
+# ### Training pipeline
 #%%
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.3)
 print('Fitting pipeline model on training data\n------------------------------')
 start = time.time()
 model = pipeline
-model.fit_transform(X_train, y_train[:, 0])
+model.fit(X_train, y_train)
 end = time.time()
-print('\nElapsed time: {:.0f} seconds'.format(end-start))
+print('Total time elapsed: {:0f} minutes ------'.format((end-start)/60))
+
+#%% [markdown]
+# ### Generating predictions on test data
+#%%
 print('\nGenerating predictions on test data\n------------------------------')
 start = time.time()
 y_preds = model.predict(X_test)
@@ -191,35 +131,83 @@ end = time.time()
 print('Elapsed time: {:.0f} seconds'.format(end-start))
 
 #%% [markdown]
-# ### 5. Test your model
-# Report the f1 score, precision and recall for each output category of the dataset. You can do this by iterating through the columns and calling sklearn's `classification_report` on each.
+# ### Testing model
+#%%
+df_metrics_untuned = metrics_collection(y_preds, y_test)
+df_metrics.append(df_metrics_untuned)
+df_metrics_untuned
+
+#%% [markdown]
+# ### Plotting results
+#%%
+def metrics_plotting(dataframes):
+    colors = ['#4284D8','#ECB26F', '#59C3B1', '#F96161'] # blue, yellow, green, light red
+    categories = ['Naive benchmark', 'Untuned model', 'Tuned model']
+    patches = []
+    for i, category in enumerate(categories):
+        patches.append(mpatches.Patch(color = colors[i], label = category))
+    plt.figure(figsize = (24, 8))
+    titles = ['F1-score', 'Precision score', 'Recall score']
+    for i in range(3):
+        if i == 2:
+            plt.legend(handles = patches, bbox_to_anchor = (0.5, 1.2, 0, 0), \
+               loc = 'upper center', borderaxespad = 0., ncol = len(patches), fontsize = 'large')
+        ax = plt.subplot(1, 3, i + 1)
+        ax.set_title(titles[i], fontsize = 14)
+        ax.set_ylim([0, 1])
+        ax.set_xlim([0, df_naive.shape[0]])
+        ax.set_xticks(range(df_naive.shape[0]))
+        ax.hlines([0.2, 0.4, 0.6, 0.8], 0, df_naive.shape[0], color = 'lightblue', linestyle = '--', linewidth = 1)
+        ax.set_xticklabels(df_naive.index)
+        for tick in ax.get_xticklabels():
+            tick.set_rotation(90)
+        for w in range(len(dataframes)):
+            try:
+                ax.bar(range(df_naive.shape[0]), dataframes[w].iloc[:,i], alpha = 0.25, color = colors[w])
+            except:
+                pass
+    plt.show()
 
 #%%
-heclassification_report)
+metrics_plotting(df_metrics)
+
+#%% [markdown]
+# ### Tuning model with GridSearchCV
+#%%
+parameters = {
+    'multi-output-classification__estimator__max_depth': [1, 3],
+    'multi-output-classification__estimator__learning_rate': [0.1, 0.2, 0.5],
+    'multi-output=classification__estimator__n_estimators': [300, 500]
+}
+scorer = make_scorer(roc_auc_score)
+cv = GridSearchCV(pipeline, param_grid = parameters, scoring = scorer, cv = 3, return_training_score = True)
 
 #%%
-def classification_report(y_preds, y_test):
-    print('Generating classification metrics\n------------------------------')
-    start = time.time()
-    for i in range(y_preds.shape[1]):
-        print(category_counts_series.index[i], '\n-------------------------------')
-        print(classification_report(y_test[:, i], y_preds[:, i]))
-    end = time.time()
-    print('Elapsed time: {:.0f} seconds'.format(end-start))
+from sklearn.metrics import roc_auc_score
+for i in range(y_preds.shape[1]):
+    print(f'{df_naive.index[i]} ---', roc_auc_score(y_test[:,i], y_preds[:,i]))
 
 #%%
-y_train[:, 0].shape
+start = time.time()
+print('Starting grid search optimization at {} -------'.format(time.time()))
+cv.fit(X_train, y_train)
+end = time.time()
+print('Total time elapsed: {:0f} minutes ------'.format((end-start)/60))
 
 #%%
-y_test.shape
+y_preds = cv.best_estimator_.predict(X_test)
+df_metrics_tuned = metrics_collection(y_preds, y_test)
+df_metrics.append(df_metrics_tuned)
+metrics_plotting(df_metrics)
 
 #%%
-precision_score(y_preds, y_test[:,0], average = 'micro')
+grid_search_res = pd.DataFrame(cv.cv_results_).iloc[:,[4, 5, 10, 11, 12, 16, 17]].set_index('rank_test_score').sort_index(ascending = True)
+grid_search_res.columns = [x.split('__')[-1] for x in grid_search_res.columns]
+grid_search_res
 
 #%%
-pd.DataFrame(y_test, columns = count_vect.vocabulary_)
+grid_search_res.to_csv(f'./models/Grid_search_results_{time.strftime("%Y%m%d_%H%M%S")}.csv')
 
 #%%
-
-
-#%%
+with open(f'./models/optim_model_{time.strftime("%Y%m%d_%H%M%S")}.pkl', 'wb') as pkl:
+    pickle.dump(cv.best_estimator_, pkl)
