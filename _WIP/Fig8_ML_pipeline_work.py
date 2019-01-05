@@ -24,7 +24,6 @@ nltk.download('wordnet')
 
 import re
 import time
-from datetime import datetime
 
 from sklearn.pipeline import Pipeline, FeatureUnion
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -206,8 +205,8 @@ grid_search_res.columns = [x.split('__')[-1] for x in grid_search_res.columns]
 grid_search_res
 
 #%%
-grid_search_res.to_csv(f'./models/Grid_search_results_{time.strftime("%Y%m%d_%H%M%S")}.csv')
+grid_search_res.to_csv(f'./_WIP/Grid_search_results_{time.strftime("%Y%m%d_%H%M%S")}.csv')
 
 #%%
-with open(f'./models/optim_model_{time.strftime("%Y%m%d_%H%M%S")}.pkl', 'wb') as pkl:
+with open(f'./_WIP/optim_model_{time.strftime("%Y%m%d_%H%M%S")}.pkl', 'wb') as pkl:
     pickle.dump(cv.best_estimator_, pkl)
