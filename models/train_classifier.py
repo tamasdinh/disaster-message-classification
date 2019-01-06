@@ -78,7 +78,7 @@ def build_model():
     return cv
 
 
-def evaluate_model(model, X_test, Y_test, model_filepath, category_names, naive_benchmark):
+def evaluate_model(model, X_test, Y_test, category_names, naive_benchmark):
     y_preds = model.predict(X_test)
     metrics_df = eh.metrics_collection(y_preds, Y_test, category_names)
     print(metrics_df)
@@ -86,7 +86,7 @@ def evaluate_model(model, X_test, Y_test, model_filepath, category_names, naive_
     metrics_list = []
     metrics_list.append(naive_benchmark)
     metrics_list.append(metrics_df)
-    eh.metrics_plotting(metrics_list, model_filepath, category_names)
+    return metrics_list
 
 
 def save_model(model, model_filepath):
@@ -108,7 +108,8 @@ def main():
         model.fit(X_train, Y_train)
         
         print('Evaluating model...')
-        evaluate_model(model, X_test, Y_test, model_filepath, category_names, naive_benchmark)
+        metrics_list = evaluate_model(model, X_test, Y_test, category_names, naive_benchmark)
+        eh.metrics_plotting(metrics_list, model_filepath, category_names)
 
         print('Saving model...\n    MODEL: {}'.format(model_filepath))
         save_model(model, model_filepath)
